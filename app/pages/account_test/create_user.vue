@@ -1,0 +1,189 @@
+<script setup lang="ts">
+import * as z from 'zod'
+import type { FormSubmitEvent } from '@nuxt/ui'
+// import enctype from 'multipart'
+// import ImageKit from 'imagekit'
+// import { db } from '~~/src'
+// import { accountsTable } from '~~/src/db/schema'
+// import { eq, or } from 'drizzle-orm'
+
+const data = ref(null)
+
+const MAX_FILE_SIZE = 2 * 1024 * 1024 // 2MB
+const MIN_DIMENSIONS = { width: 200, height: 200 }
+const MAX_DIMENSIONS = { width: 4096, height: 4096 }
+const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
+
+const formatBytes = (bytes: number, decimals = 2) => {
+  if (bytes === 0) return '0 Bytes'
+  const k = 1024
+  const dm = decimals < 0 ? 0 : decimals
+  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return Number.parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i]
+}
+
+const schema = z.object({
+  email: z.email('Invalid email'),
+  password: z.string('Password is required').min(8, 'Must be at least 8 characters'),
+  username: z.string('username is Required').min(3).max(32),
+  name: z.string('name is required').min(1).max(100),
+  avatar: z.instanceof(File, {
+    message: 'Please select an image file.'
+  })
+    .refine(file => file.size <= MAX_FILE_SIZE, {
+      message: `The image is too large. Please choose an image smaller than ${formatBytes(MAX_FILE_SIZE)}.`
+    })
+    .refine(file => ACCEPTED_IMAGE_TYPES.includes(file.type), {
+      message: 'Please upload a valid image file (JPEG, PNG, or WebP).'
+    })
+    .refine(
+      file =>
+        new Promise((resolve) => {
+          const reader = new FileReader()
+          reader.onload = (e) => {
+            const img = new Image()
+            img.onload = () => {
+              const meetsDimensions
+                = img.width >= MIN_DIMENSIONS.width
+                  && img.height >= MIN_DIMENSIONS.height
+                  && img.width <= MAX_DIMENSIONS.width
+                  && img.height <= MAX_DIMENSIONS.height
+              resolve(meetsDimensions)
+            }
+            img.src = e.target?.result as string
+          }
+          reader.readAsDataURL(file)
+        }),
+      {
+        message: `The image dimensions are invalid. Please upload an image between ${MIN_DIMENSIONS.width}x${MIN_DIMENSIONS.height} and ${MAX_DIMENSIONS.width}x${MAX_DIMENSIONS.height} pixels.`
+      }
+    )
+})
+// MAKE SURE THE REQIREMNETS HERE ARE THE SAME AS IN create_user.post.ts LEST BE THE CONSEQINCES
+type Schema = z.output<typeof schema>
+
+const state = reactive<Partial<Schema>>({
+  email: undefined,
+  password: undefined,
+  username: undefined,
+  name: undefined,
+  avatar: undefined
+})
+
+function createObjectUrl(file: File): string {
+  return URL.createObjectURL(file)
+}
+
+const toast = useToast()
+async function onSubmit(event: FormSubmitEvent<Schema>) {
+  try { // Send data to create_user.post.ts
+    const formData = new FormData()
+    formData.append('email', event.data.email)
+    formData.append('password', event.data.password)
+    formData.append('username', event.data.username)
+    formData.append('name', event.data.name)
+    formData.append('avatar', event.data.avatar) // event.data.avatar is a File
+
+    data.value = await $fetch('/api/create_user', {
+      method: 'POST',
+      body: formData
+    })
+
+    // Excessive stack depth??? Putting the comment here fixes it????
+    toast.add({ title: 'Success', description: 'The form has been submitted.', color: 'success' })
+  } catch (error) {
+    console.error(error)
+    toast.add({ title: 'Error', description: 'The Username or email are alredy in use', color: 'error' })
+  }
+  // console.log(event.data)
+}
+</script>
+
+<template>
+  <UForm
+    :schema="schema"
+    :state="state"
+    class="space-y-4 outline"
+    @submit="onSubmit"
+  >
+    <p>Create User</p>
+    <UFormField
+      label="Email"
+      name="email"
+    >
+      <UInput v-model="state.email" />
+    </UFormField>
+
+    <UFormField
+      label="Username"
+      name="username"
+    >
+      <UInput v-model="state.username" />
+    </UFormField>
+
+    <UFormField
+      label="Name"
+      name="name"
+    >
+      <UInput v-model="state.name" />
+    </UFormField>
+
+    <UFormField
+      label="Password"
+      name="password"
+    >
+      <UInput
+        v-model="state.password"
+        type="password"
+      />
+    </UFormField>
+
+    <UFormField
+      name="avatar"
+      label="Avatar"
+      description="JPG, GIF or PNG. 1MB Max."
+    >
+      <UFileUpload
+        v-slot="{ open, removeFile }"
+        v-model="state.avatar"
+        accept="image/*"
+      >
+        <div class="flex flex-wrap items-center gap-3">
+          <UAvatar
+            size="lg"
+            :src="state.avatar ? createObjectUrl(state.avatar) : undefined"
+            icon="i-lucide-image"
+          />
+
+          <UButton
+            :label="state.avatar ? 'Change image' : 'Upload image'"
+            color="neutral"
+            variant="outline"
+            @click="open()"
+          />
+        </div>
+
+        <p
+          v-if="state.avatar"
+          class="text-xs text-muted mt-1.5"
+        >
+          {{ state.avatar.name }}
+
+          <UButton
+            label="Remove"
+            color="error"
+            variant="link"
+            size="xs"
+            class="p-0"
+            @click="removeFile()"
+          />
+        </p>
+      </UFileUpload>
+    </UFormField>
+
+    <UButton type="submit">
+      Submit
+    </UButton>
+  </UForm>
+</template>
